@@ -1,0 +1,40 @@
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+version: v1.22.1
+ignore: {}
+# patches apply the minimum changes required to fix a vulnerability
+patch:
+  'npm:debug:20170905':
+    - stop-build > ggit > debug:
+        patched: '2022-02-23T18:00:39.556Z'
+  'npm:hoek:20180212':
+    - request > hawk > hoek:
+        patched: '2022-02-23T18:00:39.556Z'
+    - request > hawk > boom > hoek:
+        patched: '2022-02-23T18:00:39.556Z'
+    - request > hawk > sntp > hoek:
+        patched: '2022-02-23T18:00:39.556Z'
+    - request > hawk > cryptiles > boom > hoek:
+        patched: '2022-02-23T18:00:39.556Z'
+  SNYK-JS-LODASH-567746:
+    - css-loader > lodash:
+        patched: '2022-02-23T18:00:39.556Z'
+    - html-webpack-plugin > lodash:
+        patched: '2022-02-23T18:00:39.556Z'
+    - eslint > table > lodash:
+        patched: '2022-02-23T18:00:39.556Z'
+    - webpack-bundle-analyzer > lodash:
+        patched: '2022-02-23T18:00:39.556Z'
+    - webpack-merge > lodash:
+        patched: '2022-02-23T18:00:39.556Z'
+  'npm:lodash:20180130':
+    - stop-build > ggit > lodash:
+        patched: '2022-02-23T18:00:39.556Z'
+  'npm:moment:20170905':
+    - stop-build > ggit > moment:
+        patched: '2022-02-23T18:00:39.556Z'
+  'npm:ms:20170412':
+    - stop-build > ggit > debug > ms:
+        patched: '2022-02-23T18:00:39.556Z'
+  'npm:stringstream:20180511':
+    - request > stringstream:
+        patched: '2022-02-23T18:00:39.556Z'
