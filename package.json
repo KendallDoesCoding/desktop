@@ -36,7 +36,9 @@
     "rebuild-hard:prod": "yarn clean-slate && yarn build:prod",
     "draft-release": "ts-node -P script/tsconfig.json script/draft-release/index.ts",
     "draft-release:format": "prettier --check --write changelog.json app/package.json && yarn validate-changelog",
-    "validate-changelog": "ts-node -P script/tsconfig.json script/validate-changelog.ts"
+    "validate-changelog": "ts-node -P script/tsconfig.json script/validate-changelog.ts",
+    "prepare": "yarn run snyk-protect",
+    "snyk-protect": "snyk-protect"
   },
   "author": {
     "name": "GitHub, Inc.",
@@ -105,7 +107,8 @@
     "webpack-dev-middleware": "^5.3.1",
     "webpack-hot-middleware": "^2.25.1",
     "webpack-merge": "^5.8.0",
-    "xml2js": "^0.4.16"
+    "xml2js": "^0.4.16",
+    "@snyk/protect": "latest"
   },
   "devDependencies": {
     "@types/byline": "^4.2.31",
@@ -159,5 +162,6 @@
     "jest-esm-transformer": "^1.0.0",
     "reserved-words": "^0.1.2",
     "tsconfig-paths": "^3.9.0"
-  }
+  },
+  "snyk": true
 }
