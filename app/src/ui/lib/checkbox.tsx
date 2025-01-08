@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { createUniqueId, releaseUniqueId } from './id-pool'
+import uuid from 'uuid'
 
 /** The possible values for a Checkbox component. */
 export enum CheckboxValue {
@@ -53,7 +54,10 @@ export class Checkbox extends React.Component<ICheckboxProps, ICheckboxState> {
   }
 
   public componentWillMount() {
-    const friendlyName = this.props.label || 'unknown'
+    const friendlyName =
+      this.props.label && typeof this.props.label === 'string'
+        ? this.props.label
+        : uuid()
     const inputId = createUniqueId(`Checkbox_${friendlyName}`)
 
     this.setState({ inputId })
@@ -85,6 +89,15 @@ export class Checkbox extends React.Component<ICheckboxProps, ICheckboxState> {
     this.updateInputState()
   }
 
+  private onDoubleClick = (event: React.MouseEvent<HTMLInputElement>) => {
+    // This will prevent double clicks on the checkbox to be bubbled up in the
+    // DOM hierarchy and trigger undesired actions. For example, a double click
+    // on the checkbox in the changed file list should not open the file in the
+    // external editor.
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
   private renderLabel() {
     const label = this.props.label
     const inputId = this.state.inputId
@@ -100,6 +113,7 @@ export class Checkbox extends React.Component<ICheckboxProps, ICheckboxState> {
           tabIndex={this.props.tabIndex}
           type="checkbox"
           onChange={this.onChange}
+          onDoubleClick={this.onDoubleClick}
           ref={this.onInputRef}
           disabled={this.props.disabled}
           aria-describedby={this.props.ariaDescribedBy}
