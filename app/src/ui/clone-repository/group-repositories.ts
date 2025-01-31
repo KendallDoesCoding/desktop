@@ -1,8 +1,9 @@
 import { IAPIRepository } from '../../lib/api'
 import { IFilterListGroup, IFilterListItem } from '../lib/filter-list'
-import { OcticonSymbolType } from '../octicons'
-import * as OcticonSymbol from '../octicons/octicons.generated'
-import { entries, groupBy } from 'lodash'
+import { OcticonSymbol } from '../octicons'
+import * as octicons from '../octicons/octicons.generated'
+import entries from 'lodash/entries'
+import groupBy from 'lodash/groupBy'
 import { caseInsensitiveEquals, compare } from '../../lib/compare'
 
 /** The identifier for the "Your Repositories" grouping. */
@@ -19,21 +20,24 @@ export interface ICloneableRepositoryListItem extends IFilterListItem {
   readonly name: string
 
   /** The icon for the repo. */
-  readonly icon: OcticonSymbolType
+  readonly icon: OcticonSymbol
 
   /** The clone URL. */
   readonly url: string
+
+  /** Whether or not the repository is archived */
+  readonly archived?: boolean
 }
 
-function getIcon(gitHubRepo: IAPIRepository): OcticonSymbolType {
+function getIcon(gitHubRepo: IAPIRepository): OcticonSymbol {
   if (gitHubRepo.private) {
-    return OcticonSymbol.lock
+    return octicons.lock
   }
   if (gitHubRepo.fork) {
-    return OcticonSymbol.repoForked
+    return octicons.repoForked
   }
 
-  return OcticonSymbol.repo
+  return octicons.repo
 }
 
 const toListItems = (repositories: ReadonlyArray<IAPIRepository>) =>
@@ -44,6 +48,7 @@ const toListItems = (repositories: ReadonlyArray<IAPIRepository>) =>
       url: repo.clone_url,
       name: repo.name,
       icon: getIcon(repo),
+      archived: repo.archived,
     }))
     .sort((x, y) => compare(x.name, y.name))
 

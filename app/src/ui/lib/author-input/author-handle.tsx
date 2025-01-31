@@ -2,7 +2,7 @@ import classNames from 'classnames'
 import React from 'react'
 import { Author, isKnownAuthor } from '../../../models/author'
 import { Octicon, syncClockwise } from '../../octicons'
-import * as OcticonSymbol from '../../octicons/octicons.generated'
+import * as octicons from '../../octicons/octicons.generated'
 import { getFullTextForAuthor, getDisplayTextForAuthor } from './author-text'
 
 interface IAuthorHandleProps {
@@ -116,6 +116,7 @@ export class AuthorHandle extends React.Component<IAuthorHandleProps> {
     const { author, isFocused } = this.props
 
     return (
+      // eslint-disable-next-line github/a11y-no-title-attribute
       <div
         className={this.getClassName()}
         title={this.getTitle()}
@@ -131,13 +132,11 @@ export class AuthorHandle extends React.Component<IAuthorHandleProps> {
         {!isKnownAuthor(author) && (
           <Octicon
             className={classNames('icon', { spin: author.state !== 'error' })}
-            symbol={
-              author.state === 'error' ? OcticonSymbol.stop : syncClockwise
-            }
+            symbol={author.state === 'error' ? octicons.stop : syncClockwise}
           />
         )}
         <button onClick={this.onRemoveClick} tabIndex={-1}>
-          <Octicon className="delete" symbol={OcticonSymbol.x} />
+          <Octicon className="delete" symbol={octicons.x} />
         </button>
       </div>
     )

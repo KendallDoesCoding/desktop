@@ -54,6 +54,15 @@ export interface ITooltipProps<T> {
   readonly interactive?: boolean
 
   /**
+   * Whether or not the tooltip should be dismissable via the escape key. This
+   * is generally true, but if the tooltip is communicating something important
+   * to the user, such as an input error, it should not be dismissable.
+   *
+   * Defaults to true
+   */
+  readonly dismissable?: boolean
+
+  /**
    * The amount of time to wait (in milliseconds) while a user hovers over the
    * target before displaying the tooltip. There's typically no reason to
    * increase this but it may be used to show the tooltip without any delay (by
@@ -110,13 +119,44 @@ export interface ITooltipProps<T> {
    */
   readonly tooltipOffset?: DOMRect
 
-  /**Optional parameter for toggle tip behavior */
+  /** Optional parameter for toggle tip behavior.
+   *
+   * This means that on target click
+   * the tooltip will be shown but not on target focus.
+   */
   readonly isToggleTip?: boolean
+
+  /** Optional parameter for to open on target click
+   *
+   * If you are looking for toggle tip behavior (tooltip does not open on
+   * focus), use isToggleTip instead.
+   */
+  readonly openOnTargetClick?: boolean
 
   /** Open on target focus - typically only tooltips that target an element with
    * ":focus-visible open on focus. This means any time the target it focused it
    * opens." */
   readonly openOnFocus?: boolean
+
+  /** Whether or not an ancestor component is focused, used in case we want
+   * the tooltip to be shown when it's focused. Examples of this are how we
+   * want to show the tooltip for file status icons when files in the file
+   * list are focused.
+   */
+  readonly ancestorFocused?: boolean
+
+  /** Whether or not to apply the aria-desribedby to the target element.
+   *
+   * Sometimes the target element maybe something like a button that already has
+   * an aria label that is the same as the tooltip content, if so this should be
+   * false.
+   *
+   * Note: If the tooltip does provide more context than the targets accessible
+   * label (visual or aria), this should be true.
+   *
+   * Default: true
+   * */
+  readonly applyAriaDescribedBy?: boolean
 }
 
 interface ITooltipState {
@@ -275,10 +315,85 @@ export class Tooltip<T extends TooltipTarget> extends React.Component<
 
     if (this.state.show !== prevState.show) {
       if (this.state.show && this.props.accessible !== false && this.state.id) {
-        target?.setAttribute('aria-describedby', this.state.id)
+        this.addToTargetAriaDescribedBy(target)
       } else {
-        target?.removeAttribute('aria-describedby')
+        this.removeFromTargetAriaDescribedBy(target)
       }
+    }
+
+    if (prevProps.ancestorFocused !== this.props.ancestorFocused) {
+      this.updateBasedOnAncestorFocused()
+    }
+  }
+
+  private addToTargetAriaDescribedBy(target: TooltipTarget | null) {
+    if (
+      !target ||
+      !this.state.id ||
+      this.props.applyAriaDescribedBy === false
+    ) {
+      return
+    }
+
+    const ariaDescribedBy = target.getAttribute('aria-describedby')
+    const ariaDescribedByArray = ariaDescribedBy
+      ? ariaDescribedBy.split(' ')
+      : []
+    if (!ariaDescribedByArray.includes(this.state.id)) {
+      ariaDescribedByArray.push(this.state.id)
+      target.setAttribute('aria-describedby', ariaDescribedByArray.join(' '))
+    }
+  }
+
+  private removeFromTargetAriaDescribedBy(target: TooltipTarget | null) {
+    if (
+      !target ||
+      !this.state.id ||
+      this.props.applyAriaDescribedBy === false
+    ) {
+      return
+    }
+
+    const ariaDescribedBy = target.getAttribute('aria-describedby')
+    const ariaDescribedByArray = ariaDescribedBy
+      ? ariaDescribedBy.split(' ')
+      : []
+    const index = ariaDescribedByArray.indexOf(this.state.id)
+    if (index === -1) {
+      return
+    }
+
+    ariaDescribedByArray.splice(index, 1)
+
+    if (ariaDescribedByArray.length === 0) {
+      target.removeAttribute('aria-describedby')
+    } else {
+      target.setAttribute('aria-describedby', ariaDescribedByArray.join(' '))
+    }
+  }
+
+  private updateBasedOnAncestorFocused() {
+    const { target } = this.state
+    if (target === null) {
+      return
+    }
+
+    const { ancestorFocused } = this.props
+    if (ancestorFocused === true) {
+      this.beginShowTooltip()
+    } else if (ancestorFocused === false) {
+      this.beginHideTooltip()
+    }
+  }
+
+  private onKeyDown = (event: KeyboardEvent) => {
+    if (
+      event.key === 'Escape' &&
+      this.state.show &&
+      this.props.dismissable !== false
+    ) {
+      event.preventDefault()
+      this.beginHideTooltip()
     }
   }
 
@@ -294,12 +409,13 @@ export class Tooltip<T extends TooltipTarget> extends React.Component<
     elem.addEventListener('tooltip-shown', this.onTooltipShown)
     elem.addEventListener('tooltip-hidden', this.onTooltipHidden)
     elem.addEventListener('click', this.onTargetClick)
+    elem.addEventListener('keydown', this.onKeyDown)
   }
 
   private removeTooltip(prevTarget: TooltipTarget | null) {
     if (prevTarget !== null) {
       if (prevTarget.getAttribute('aria-describedby')) {
-        prevTarget.removeAttribute('aria-describedby')
+        this.removeFromTargetAriaDescribedBy(prevTarget)
       }
       prevTarget.removeEventListener('mouseenter', this.onTargetMouseEnter)
       prevTarget.removeEventListener('mouseleave', this.onTargetMouseLeave)
@@ -310,6 +426,7 @@ export class Tooltip<T extends TooltipTarget> extends React.Component<
       prevTarget.removeEventListener('focusout', this.onTargetBlur)
       prevTarget.removeEventListener('blur', this.onTargetBlur)
       prevTarget.removeEventListener('click', this.onTargetClick)
+      prevTarget.removeEventListener('keydown', this.onKeyDown)
     }
   }
 
@@ -351,7 +468,10 @@ export class Tooltip<T extends TooltipTarget> extends React.Component<
 
   private onTargetClick = (event: FocusEvent) => {
     // We only want to handle click events for toggle tips
-    if (!this.state.show && this.props.isToggleTip) {
+    if (
+      !this.state.show &&
+      (this.props.isToggleTip || this.props.openOnTargetClick)
+    ) {
       this.beginShowTooltip()
     }
   }
@@ -662,7 +782,9 @@ function getTooltipPositionStyle(
   r.x -= host.x
   r.y -= host.y
 
-  return { transform: `translate(${r.left}px, ${r.top}px)` }
+  return {
+    transform: `translate(${Math.round(r.left)}px, ${Math.round(r.top)}px)`,
+  }
 }
 
 function getTooltipRectRelativeTo(
