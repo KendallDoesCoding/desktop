@@ -31,25 +31,6 @@ interface IAppMenuProps {
    */
   readonly enableAccessKeyNavigation: boolean
 
-  /**
-   * Whether the menu was opened by pressing Alt (or Alt+X where X is an
-   * access key for one of the top level menu items). This is used as a
-   * one-time signal to the AppMenu to use some special semantics for
-   * selection and focus. Specifically it will ensure that the last opened
-   * menu will receive focus.
-   */
-  readonly openedWithAccessKey: boolean
-
-  /**
-   * If true the MenuPane only takes up as much vertical space needed to
-   * show all menu items. This does not affect maximum height, i.e. if the
-   * visible menu items takes up more space than what is available the menu
-   * will still overflow and be scrollable.
-   *
-   * @default false
-   */
-  readonly autoHeight?: boolean
-
   /** The id of the element that serves as the menu's accessibility label */
   readonly ariaLabelledby: string
 }
@@ -230,13 +211,6 @@ export class AppMenu extends React.Component<IAppMenuProps, {}> {
     }
   }
 
-  private onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (!event.defaultPrevented && event.key === 'Escape') {
-      event.preventDefault()
-      this.props.onClose({ type: 'keyboard', event })
-    }
-  }
-
   private renderMenuPane(depth: number, menu: IMenu): JSX.Element {
     // If the menu doesn't have an id it's the root menu
     const key = menu.id || '@'
@@ -264,12 +238,7 @@ export class AppMenu extends React.Component<IAppMenuProps, {}> {
     const menus = this.props.state
     const panes = menus.map((m, depth) => this.renderMenuPane(depth, m))
 
-    return (
-      // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-      <div id="app-menu-foldout" onKeyDown={this.onKeyDown}>
-        {panes}
-      </div>
-    )
+    return <div id="app-menu-foldout">{panes}</div>
   }
 
   public componentWillUnmount() {

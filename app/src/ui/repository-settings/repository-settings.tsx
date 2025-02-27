@@ -30,7 +30,7 @@ import {
 } from '../lib/identifier-rules'
 import { Account } from '../../models/account'
 import { Octicon } from '../octicons'
-import * as OcticonSymbol from '../octicons/octicons.generated'
+import * as octicons from '../octicons/octicons.generated'
 
 interface IRepositorySettingsProps {
   readonly initialSelectedTab?: RepositorySettingsTab
@@ -65,6 +65,7 @@ interface IRepositorySettingsState {
   readonly initialCommitterEmail: string | null
   readonly errors?: ReadonlyArray<JSX.Element | string>
   readonly forkContributionTarget: ForkContributionTarget
+  readonly isLoadingGitConfig: boolean
 }
 
 export class RepositorySettings extends React.Component<
@@ -91,6 +92,7 @@ export class RepositorySettings extends React.Component<
       initialGitConfigLocation: GitConfigLocation.Global,
       initialCommitterName: null,
       initialCommitterEmail: null,
+      isLoadingGitConfig: true,
     }
   }
 
@@ -143,6 +145,7 @@ export class RepositorySettings extends React.Component<
       initialGitConfigLocation: gitConfigLocation,
       initialCommitterName: localCommitterName,
       initialCommitterEmail: localCommitterEmail,
+      isLoadingGitConfig: false,
     })
   }
 
@@ -181,20 +184,20 @@ export class RepositorySettings extends React.Component<
             type={TabBarType.Vertical}
           >
             <span>
-              <Octicon className="icon" symbol={OcticonSymbol.server} />
+              <Octicon className="icon" symbol={octicons.server} />
               Remote
             </span>
             <span>
-              <Octicon className="icon" symbol={OcticonSymbol.file} />
+              <Octicon className="icon" symbol={octicons.file} />
               {__DARWIN__ ? 'Ignored Files' : 'Ignored files'}
             </span>
             <span>
-              <Octicon className="icon" symbol={OcticonSymbol.gitCommit} />
+              <Octicon className="icon" symbol={octicons.gitCommit} />
               {__DARWIN__ ? 'Git Config' : 'Git config'}
             </span>
             {showForkSettings && (
               <span>
-                <Octicon className="icon" symbol={OcticonSymbol.repoForked} />
+                <Octicon className="icon" symbol={octicons.repoForked} />
                 {__DARWIN__ ? 'Fork Behavior' : 'Fork behavior'}
               </span>
             )}
@@ -202,25 +205,13 @@ export class RepositorySettings extends React.Component<
 
           <div className="active-tab">{this.renderActiveTab()}</div>
         </div>
-        {this.renderFooter()}
+        <DialogFooter>
+          <OkCancelButtonGroup
+            okButtonText="Save"
+            okButtonDisabled={this.state.saveDisabled}
+          />
+        </DialogFooter>
       </Dialog>
-    )
-  }
-
-  private renderFooter() {
-    const tab = this.state.selectedTab
-    const remote = this.state.remote
-    if (tab === RepositorySettingsTab.Remote && !remote) {
-      return null
-    }
-
-    return (
-      <DialogFooter>
-        <OkCancelButtonGroup
-          okButtonText="Save"
-          okButtonDisabled={this.state.saveDisabled}
-        />
-      </DialogFooter>
     )
   }
 
@@ -277,6 +268,7 @@ export class RepositorySettings extends React.Component<
             globalEmail={this.state.globalCommitterEmail}
             onNameChanged={this.onCommitterNameChanged}
             onEmailChanged={this.onCommitterEmailChanged}
+            isLoadingGitConfig={this.state.isLoadingGitConfig}
           />
         )
       }

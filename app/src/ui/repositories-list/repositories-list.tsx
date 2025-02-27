@@ -9,13 +9,13 @@ import {
   KnownRepositoryGroup,
   makeRecentRepositoriesGroup,
 } from './group-repositories'
-import { FilterList, IFilterListGroup } from '../lib/filter-list'
+import { IFilterListGroup } from '../lib/filter-list'
 import { IMatches } from '../../lib/fuzzy-find'
 import { ILocalRepositoryState, Repository } from '../../models/repository'
 import { Dispatcher } from '../dispatcher'
 import { Button } from '../lib/button'
 import { Octicon } from '../octicons'
-import * as OcticonSymbol from '../octicons/octicons.generated'
+import * as octicons from '../octicons/octicons.generated'
 import { showContextualMenu } from '../../lib/menu-item'
 import { IMenuItem } from '../../lib/menu-item'
 import { PopupType } from '../../models/popup'
@@ -23,6 +23,8 @@ import { encodePathAsUrl } from '../../lib/path'
 import { TooltippedContent } from '../lib/tooltipped-content'
 import memoizeOne from 'memoize-one'
 import { KeyboardShortcut } from '../keyboard-shortcut/keyboard-shortcut'
+import { generateRepositoryListContextMenu } from '../repositories-list/repository-list-item-context-menu'
+import { SectionFilterList } from '../lib/section-filter-list'
 
 const BlankSlateImage = encodePathAsUrl(__dirname, 'static/empty-no-repo.svg')
 
@@ -64,7 +66,7 @@ interface IRepositoriesListProps {
   readonly externalEditorLabel?: string
 
   /** The label for the user's preferred shell. */
-  readonly shellLabel: string
+  readonly shellLabel?: string
 
   /** The callback to fire when the filter text has changed */
   readonly onFilterTextChanged: (text: string) => void
@@ -73,6 +75,10 @@ interface IRepositoriesListProps {
   readonly filterText: string
 
   readonly dispatcher: Dispatcher
+}
+
+interface IRepositoriesListState {
+  readonly newRepositoryMenuExpanded: boolean
 }
 
 const RowHeight = 29
@@ -101,7 +107,7 @@ function findMatchingListItem(
 /** The list of user-added repositories. */
 export class RepositoriesList extends React.Component<
   IRepositoriesListProps,
-  {}
+  IRepositoriesListState
 > {
   /**
    * A memoized function for grouping repositories for display
@@ -130,6 +136,14 @@ export class RepositoriesList extends React.Component<
    */
   private getSelectedListItem = memoizeOne(findMatchingListItem)
 
+  public constructor(props: IRepositoriesListProps) {
+    super(props)
+
+    this.state = {
+      newRepositoryMenuExpanded: false,
+    }
+  }
+
   private renderItem = (item: IRepositoryListItem, matches: IMatches) => {
     const repository = item.repository
     return (
@@ -137,18 +151,6 @@ export class RepositoriesList extends React.Component<
         key={repository.id}
         repository={repository}
         needsDisambiguation={item.needsDisambiguation}
-        askForConfirmationOnRemoveRepository={
-          this.props.askForConfirmationOnRemoveRepository
-        }
-        onRemoveRepository={this.props.onRemoveRepository}
-        onShowRepository={this.props.onShowRepository}
-        onViewOnGitHub={this.props.onViewOnGitHub}
-        onOpenInShell={this.props.onOpenInShell}
-        onOpenInExternalEditor={this.props.onOpenInExternalEditor}
-        onChangeRepositoryAlias={this.onChangeRepositoryAlias}
-        onRemoveRepositoryAlias={this.onRemoveRepositoryAlias}
-        externalEditorLabel={this.props.externalEditorLabel}
-        shellLabel={this.props.shellLabel}
         matches={matches}
         aheadBehind={item.aheadBehind}
         changedFilesCount={item.changedFilesCount}
@@ -193,6 +195,36 @@ export class RepositoriesList extends React.Component<
     this.props.onSelectionChanged(item.repository)
   }
 
+  private onItemContextMenu = (
+    item: IRepositoryListItem,
+    event: React.MouseEvent<HTMLDivElement>
+  ) => {
+    event.preventDefault()
+
+    const items = generateRepositoryListContextMenu({
+      onRemoveRepository: this.props.onRemoveRepository,
+      onShowRepository: this.props.onShowRepository,
+      onOpenInShell: this.props.onOpenInShell,
+      onOpenInExternalEditor: this.props.onOpenInExternalEditor,
+      askForConfirmationOnRemoveRepository:
+        this.props.askForConfirmationOnRemoveRepository,
+      externalEditorLabel: this.props.externalEditorLabel,
+      onChangeRepositoryAlias: this.onChangeRepositoryAlias,
+      onRemoveRepositoryAlias: this.onRemoveRepositoryAlias,
+      onViewOnGitHub: this.props.onViewOnGitHub,
+      repository: item.repository,
+      shellLabel: this.props.shellLabel,
+    })
+
+    showContextualMenu(items)
+  }
+
+  private getItemAriaLabel = (item: IRepositoryListItem) => item.repository.name
+  private getGroupAriaLabelGetter =
+    (groups: ReadonlyArray<IFilterListGroup<IRepositoryListItem>>) =>
+    (group: number) =>
+      groups[group].identifier
+
   public render() {
     const baseGroups = this.getRepositoryGroups(
       this.props.repositories,
@@ -218,7 +250,7 @@ export class RepositoriesList extends React.Component<
 
     return (
       <div className="repository-list">
-        <FilterList<IRepositoryListItem>
+        <SectionFilterList<IRepositoryListItem>
           rowHeight={RowHeight}
           selectedItem={selectedItem}
           filterText={this.props.filterText}
@@ -233,6 +265,9 @@ export class RepositoriesList extends React.Component<
             repositories: this.props.repositories,
             filterText: this.props.filterText,
           }}
+          onItemContextMenu={this.onItemContextMenu}
+          getGroupAriaLabel={this.getGroupAriaLabelGetter(groups)}
+          getItemAriaLabel={this.getItemAriaLabel}
         />
       </div>
     )
@@ -243,11 +278,21 @@ export class RepositoriesList extends React.Component<
       <Button
         className="new-repository-button"
         onClick={this.onNewRepositoryButtonClick}
+        ariaExpanded={this.state.newRepositoryMenuExpanded}
+        onKeyDown={this.onNewRepositoryButtonKeyDown}
       >
         Add
-        <Octicon symbol={OcticonSymbol.triangleDown} />
+        <Octicon symbol={octicons.triangleDown} />
       </Button>
     )
+  }
+
+  private onNewRepositoryButtonKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>
+  ) => {
+    if (event.key === 'ArrowDown') {
+      this.onNewRepositoryButtonClick()
+    }
   }
 
   private renderNoItems = () => {
@@ -292,7 +337,10 @@ export class RepositoriesList extends React.Component<
       },
     ]
 
-    showContextualMenu(items)
+    this.setState({ newRepositoryMenuExpanded: true })
+    showContextualMenu(items).then(() => {
+      this.setState({ newRepositoryMenuExpanded: false })
+    })
   }
 
   private onCloneRepository = () => {

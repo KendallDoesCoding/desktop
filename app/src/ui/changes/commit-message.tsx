@@ -13,8 +13,8 @@ import { Button } from '../lib/button'
 import { Loading } from '../lib/loading'
 import { AuthorInput } from '../lib/author-input/author-input'
 import { FocusContainer } from '../lib/focus-container'
-import { Octicon } from '../octicons'
-import * as OcticonSymbol from '../octicons/octicons.generated'
+import { Octicon, OcticonSymbolVariant } from '../octicons'
+import * as octicons from '../octicons/octicons.generated'
 import { Author, UnknownAuthor, isKnownAuthor } from '../../models/author'
 import { IMenuItem } from '../../lib/menu-item'
 import { Commit, ICommitContext } from '../../models/commit'
@@ -24,10 +24,16 @@ import { LinkButton } from '../lib/link-button'
 import { Foldout, FoldoutType } from '../../lib/app-state'
 import { IAvatarUser, getAvatarUserFromAuthor } from '../../models/avatar'
 import { showContextualMenu } from '../../lib/menu-item'
-import { Account } from '../../models/account'
-import { CommitMessageAvatar } from './commit-message-avatar'
-import { getDotComAPIEndpoint } from '../../lib/api'
-import { isAttributableEmailFor, lookupPreferredEmail } from '../../lib/email'
+import { Account, isEnterpriseAccount } from '../../models/account'
+import {
+  CommitMessageAvatar,
+  CommitMessageAvatarWarningType,
+} from './commit-message-avatar'
+import {
+  getStealthEmailForUser,
+  isAttributableEmailFor,
+  lookupPreferredEmail,
+} from '../../lib/email'
 import { setGlobalConfigValue } from '../../lib/git/config'
 import { Popup, PopupType } from '../../models/popup'
 import { RepositorySettingsTab } from '../repository-settings/repository-settings'
@@ -36,17 +42,40 @@ import { isEmptyOrWhitespace } from '../../lib/is-empty-or-whitespace'
 import { TooltipDirection } from '../lib/tooltip'
 import { pick } from '../../lib/pick'
 import { ToggledtippedContent } from '../lib/toggletipped-content'
+import { PreferencesTab } from '../../models/preferences'
+import {
+  RepoRuleEnforced,
+  RepoRulesInfo,
+  RepoRulesMetadataFailures,
+} from '../../models/repo-rules'
+import { IAheadBehind } from '../../models/branch'
+import {
+  Popover,
+  PopoverAnchorPosition,
+  PopoverDecoration,
+} from '../lib/popover'
+import { RepoRulesetsForBranchLink } from '../repository-rules/repo-rulesets-for-branch-link'
+import { RepoRulesMetadataFailureList } from '../repository-rules/repo-rules-failure-list'
+import { formatCommitMessage } from '../../lib/format-commit-message'
+import { useRepoRulesLogic } from '../../lib/helpers/repo-rules'
+import { isDotCom } from '../../lib/endpoint-capabilities'
 
-const addAuthorIcon = {
+const addAuthorIcon: OcticonSymbolVariant = {
   w: 18,
   h: 13,
-  d:
+  p: [
     'M14 6V4.25a.75.75 0 0 1 1.5 0V6h1.75a.75.75 0 1 1 0 1.5H15.5v1.75a.75.75 0 0 ' +
-    '1-1.5 0V7.5h-1.75a.75.75 0 1 1 0-1.5H14zM8.5 4a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 ' +
-    '0zm.063 3.064a3.995 3.995 0 0 0 1.2-4.429A3.996 3.996 0 0 0 8.298.725a4.01 4.01 0 0 ' +
-    '0-6.064 1.91 3.987 3.987 0 0 0 1.2 4.43A5.988 5.988 0 0 0 0 12.2a.748.748 0 0 0 ' +
-    '.716.766.751.751 0 0 0 .784-.697 4.49 4.49 0 0 1 1.39-3.04 4.51 4.51 0 0 1 6.218 ' +
-    '0 4.49 4.49 0 0 1 1.39 3.04.748.748 0 0 0 .786.73.75.75 0 0 0 .714-.8 5.989 5.989 0 0 0-3.435-5.136z',
+      '1-1.5 0V7.5h-1.75a.75.75 0 1 1 0-1.5H14zM8.5 4a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 ' +
+      '0zm.063 3.064a3.995 3.995 0 0 0 1.2-4.429A3.996 3.996 0 0 0 8.298.725a4.01 4.01 0 0 ' +
+      '0-6.064 1.91 3.987 3.987 0 0 0 1.2 4.43A5.988 5.988 0 0 0 0 12.2a.748.748 0 0 0 ' +
+      '.716.766.751.751 0 0 0 .784-.697 4.49 4.49 0 0 1 1.39-3.04 4.51 4.51 0 0 1 6.218 ' +
+      '0 4.49 4.49 0 0 1 1.39 3.04.748.748 0 0 0 .786.73.75.75 0 0 0 .714-.8 5.989 5.989 0 0 0-3.435-5.136z',
+  ],
+}
+
+interface ICreateCommitOptions {
+  warnUnknownAuthors: boolean
+  warnFilesNotVisible: boolean
 }
 
 interface ICommitMessageProps {
@@ -54,6 +83,10 @@ interface ICommitMessageProps {
   readonly branch: string | null
   readonly commitAuthor: CommitIdentity | null
   readonly anyFilesSelected: boolean
+  readonly filesToBeCommittedCount?: number
+  /** Whether the user can see all the files to commit in the changes list. They
+   * may not be able to if the list is filtered */
+  readonly showPromptForCommittingFileHiddenByFilter?: boolean
   readonly isShowingModal: boolean
   readonly isShowingFoldout: boolean
 
@@ -72,6 +105,8 @@ interface ICommitMessageProps {
   readonly placeholder: string
   readonly prepopulateCommitSummary: boolean
   readonly showBranchProtected: boolean
+  readonly repoRulesInfo: RepoRulesInfo
+  readonly aheadBehind: IAheadBehind | null
   readonly showNoWriteAccess: boolean
 
   /**
@@ -79,6 +114,11 @@ interface ICommitMessageProps {
    * a commit (currently only supported for GH/GHE repositories)
    */
   readonly showCoAuthoredBy: boolean
+
+  /**
+   * Whether or not to show a input labels (Default: false)
+   */
+  readonly showInputLabels?: boolean
 
   /**
    * A list of authors (name, email pairs) which have been
@@ -93,6 +133,8 @@ interface ICommitMessageProps {
   readonly shouldNudge?: boolean
 
   readonly commitSpellcheckEnabled: boolean
+
+  readonly showCommitLengthWarning: boolean
 
   /** Optional text to override default commit button text */
   readonly commitButtonText?: string
@@ -132,6 +174,9 @@ interface ICommitMessageProps {
   readonly onCommitSpellcheckEnabledChanged: (enabled: boolean) => void
   readonly onStopAmending: () => void
   readonly onShowCreateForkDialog: () => void
+  readonly onFilesToCommitNotVisible?: (onCommitAnyway: () => {}) => void
+  readonly onSuccessfulCommitCreated?: () => void
+  readonly accounts: ReadonlyArray<Account>
 }
 
 interface ICommitMessageState {
@@ -151,6 +196,14 @@ interface ICommitMessageState {
   readonly descriptionObscured: boolean
 
   readonly isCommittingStatusMessage: string
+
+  readonly repoRulesEnabled: boolean
+
+  readonly isRuleFailurePopoverOpen: boolean
+
+  readonly repoRuleCommitMessageFailures: RepoRulesMetadataFailures
+  readonly repoRuleCommitAuthorFailures: RepoRulesMetadataFailures
+  readonly repoRuleBranchNameFailures: RepoRulesMetadataFailures
 }
 
 function findCommitMessageAutoCompleteProvider(
@@ -186,6 +239,8 @@ export class CommitMessage extends React.Component<
 
   private coAuthorInputRef = React.createRef<AuthorInput>()
 
+  private readonly COMMIT_MSG_ERROR_BTN_ID = 'commit-message-failure-hint'
+
   public constructor(props: ICommitMessageProps) {
     super(props)
     const { commitMessage } = this.props
@@ -200,6 +255,11 @@ export class CommitMessage extends React.Component<
       ),
       descriptionObscured: false,
       isCommittingStatusMessage: '',
+      repoRulesEnabled: false,
+      isRuleFailurePopoverOpen: false,
+      repoRuleCommitMessageFailures: new RepoRulesMetadataFailures(),
+      repoRuleCommitAuthorFailures: new RepoRulesMetadataFailures(),
+      repoRuleBranchNameFailures: new RepoRulesMetadataFailures(),
     }
   }
 
@@ -210,8 +270,9 @@ export class CommitMessage extends React.Component<
     window.removeEventListener('keydown', this.onKeyDown)
   }
 
-  public componentDidMount() {
+  public async componentDidMount() {
     window.addEventListener('keydown', this.onKeyDown)
+    await this.updateRepoRuleFailures(undefined, undefined, true)
   }
 
   /**
@@ -226,38 +287,25 @@ export class CommitMessage extends React.Component<
   public componentWillReceiveProps(nextProps: ICommitMessageProps) {
     const { commitMessage } = nextProps
 
-    // If we switch from not amending to amending, we want to populate the
-    // textfields with the commit message from the commit.
-    if (this.props.commitToAmend === null && nextProps.commitToAmend !== null) {
-      this.fillWithCommitMessage({
-        summary: nextProps.commitToAmend.summary,
-        description: nextProps.commitToAmend.body,
-      })
-    } else if (
-      this.props.commitToAmend !== null &&
-      nextProps.commitToAmend === null &&
-      commitMessage !== null
-    ) {
-      this.fillWithCommitMessage(commitMessage)
-    }
-
     if (!commitMessage || commitMessage === this.props.commitMessage) {
       return
     }
 
-    if (this.state.summary === '' && !this.state.description) {
-      this.fillWithCommitMessage(commitMessage)
+    if (
+      (this.state.summary === '' && !this.state.description) ||
+      (this.props.commitToAmend === null && nextProps.commitToAmend)
+    ) {
+      this.setState({
+        summary: commitMessage.summary,
+        description: commitMessage.description,
+      })
     }
   }
 
-  private fillWithCommitMessage(commitMessage: ICommitMessage) {
-    this.setState({
-      summary: commitMessage.summary,
-      description: commitMessage.description,
-    })
-  }
-
-  public componentDidUpdate(prevProps: ICommitMessageProps) {
+  public async componentDidUpdate(
+    prevProps: ICommitMessageProps,
+    prevState: ICommitMessageState
+  ) {
     if (
       this.props.autocompletionProviders !== prevProps.autocompletionProviders
     ) {
@@ -282,7 +330,8 @@ export class CommitMessage extends React.Component<
       this.isCoAuthorInputVisible &&
       // The co-author input could be also shown when switching between repos,
       // but in that case we don't want to give the focus to the input.
-      prevProps.repository.id === this.props.repository.id
+      prevProps.repository.id === this.props.repository.id &&
+      !!prevProps.commitToAmend === !!this.props.commitToAmend
     ) {
       this.coAuthorInputRef.current?.focus()
     }
@@ -303,6 +352,124 @@ export class CommitMessage extends React.Component<
       this.setState({
         isCommittingStatusMessage: `Committed Just now - ${this.props.mostRecentLocalCommit.summary} (Sha: ${this.props.mostRecentLocalCommit.shortSha})`,
       })
+    }
+
+    await this.updateRepoRuleFailures(prevProps, prevState)
+  }
+
+  private async updateRepoRuleFailures(
+    prevProps?: ICommitMessageProps,
+    prevState?: ICommitMessageState,
+    forceUpdate: boolean = false
+  ) {
+    let repoRulesEnabled = this.state.repoRulesEnabled
+    if (
+      forceUpdate ||
+      prevProps?.repository !== this.props.repository ||
+      prevProps?.repositoryAccount !== this.props.repositoryAccount
+    ) {
+      repoRulesEnabled = useRepoRulesLogic(
+        this.props.repositoryAccount,
+        this.props.repository
+      )
+      this.setState({ repoRulesEnabled })
+    }
+
+    if (!repoRulesEnabled) {
+      return
+    }
+
+    await this.updateRepoRulesCommitMessageFailures(
+      prevProps,
+      prevState,
+      forceUpdate
+    )
+    this.updateRepoRulesCommitAuthorFailures(prevProps, forceUpdate)
+    this.updateRepoRulesBranchNameFailures(prevProps, forceUpdate)
+  }
+
+  private async updateRepoRulesCommitMessageFailures(
+    prevProps?: ICommitMessageProps,
+    prevState?: ICommitMessageState,
+    forceUpdate?: boolean
+  ) {
+    if (
+      forceUpdate ||
+      prevState?.summary !== this.state.summary ||
+      prevState?.description !== this.state.description ||
+      prevProps?.coAuthors !== this.props.coAuthors ||
+      prevProps?.commitToAmend !== this.props.commitToAmend ||
+      prevProps?.repository !== this.props.repository ||
+      prevProps?.repoRulesInfo.commitMessagePatterns !==
+        this.props.repoRulesInfo.commitMessagePatterns
+    ) {
+      let summary = this.state.summary
+      if (!summary && !this.state.description) {
+        summary = this.summaryOrPlaceholder
+      }
+
+      const context: ICommitContext = {
+        summary,
+        description: this.state.description,
+        trailers: this.getCoAuthorTrailers(),
+        amend: this.props.commitToAmend !== null,
+      }
+
+      const msg = await formatCommitMessage(this.props.repository, context)
+      const failures =
+        this.props.repoRulesInfo.commitMessagePatterns.getFailedRules(msg)
+
+      this.setState({ repoRuleCommitMessageFailures: failures })
+    }
+  }
+
+  private updateRepoRulesCommitAuthorFailures(
+    prevProps?: ICommitMessageProps,
+    forceUpdate?: boolean
+  ) {
+    if (
+      forceUpdate ||
+      prevProps?.commitAuthor?.email !== this.props.commitAuthor?.email ||
+      prevProps?.repoRulesInfo.commitAuthorEmailPatterns !==
+        this.props.repoRulesInfo.commitAuthorEmailPatterns
+    ) {
+      const email = this.props.commitAuthor?.email
+      let failures: RepoRulesMetadataFailures
+
+      if (!email) {
+        failures = new RepoRulesMetadataFailures()
+      } else {
+        failures =
+          this.props.repoRulesInfo.commitAuthorEmailPatterns.getFailedRules(
+            email
+          )
+      }
+
+      this.setState({ repoRuleCommitAuthorFailures: failures })
+    }
+  }
+
+  private updateRepoRulesBranchNameFailures(
+    prevProps?: ICommitMessageProps,
+    forceUpdate?: boolean
+  ) {
+    if (
+      forceUpdate ||
+      prevProps?.branch !== this.props.branch ||
+      prevProps?.repoRulesInfo.branchNamePatterns !==
+        this.props.repoRulesInfo.branchNamePatterns
+    ) {
+      const branch = this.props.branch
+      let failures: RepoRulesMetadataFailures
+
+      if (!branch) {
+        failures = new RepoRulesMetadataFailures()
+      } else {
+        failures =
+          this.props.repoRulesInfo.branchNamePatterns.getFailedRules(branch)
+      }
+
+      this.setState({ repoRuleBranchNameFailures: failures })
     }
   }
 
@@ -345,26 +512,24 @@ export class CommitMessage extends React.Component<
       : this.state.summary
   }
 
-  private forceCreateCommit = async () => {
-    return this.createCommit(false)
-  }
-
-  private async createCommit(warnUnknownAuthors: boolean = true) {
+  private async createCommit(options?: ICreateCommitOptions) {
     const { description } = this.state
 
     if (!this.canCommit() && !this.canAmend()) {
       return
     }
 
-    if (warnUnknownAuthors) {
+    if (options?.warnUnknownAuthors !== false) {
       const unknownAuthors = this.props.coAuthors.filter(
         (author): author is UnknownAuthor => !isKnownAuthor(author)
       )
 
       if (unknownAuthors.length > 0) {
-        this.props.onConfirmCommitWithUnknownCoAuthors(
-          unknownAuthors,
-          this.forceCreateCommit
+        this.props.onConfirmCommitWithUnknownCoAuthors(unknownAuthors, () =>
+          this.createCommit({
+            warnUnknownAuthors: false,
+            warnFilesNotVisible: options?.warnFilesNotVisible === true,
+          })
         )
         return
       }
@@ -379,26 +544,66 @@ export class CommitMessage extends React.Component<
       amend: this.props.commitToAmend !== null,
     }
 
+    if (
+      options?.warnFilesNotVisible !== false &&
+      this.props.showPromptForCommittingFileHiddenByFilter === true &&
+      this.props.onFilesToCommitNotVisible
+    ) {
+      this.props.onFilesToCommitNotVisible(() =>
+        this.createCommit({
+          warnUnknownAuthors: options?.warnUnknownAuthors === true,
+          warnFilesNotVisible: false,
+        })
+      )
+      return
+    }
+
     const timer = startTimer('create commit', this.props.repository)
     const commitCreated = await this.props.onCreateCommit(commitContext)
     timer.done()
 
     if (commitCreated) {
+      this.props.onSuccessfulCommitCreated?.()
       this.clearCommitMessage()
     }
   }
 
   private canCommit(): boolean {
     return (
-      (this.props.anyFilesSelected === true && this.state.summary.length > 0) ||
-      this.props.prepopulateCommitSummary
+      ((this.props.anyFilesSelected === true &&
+        this.state.summary.length > 0) ||
+        this.props.prepopulateCommitSummary) &&
+      !this.hasRepoRuleFailure()
     )
   }
 
   private canAmend(): boolean {
     return (
       this.props.commitToAmend !== null &&
-      (this.state.summary.length > 0 || this.props.prepopulateCommitSummary)
+      (this.state.summary.length > 0 || this.props.prepopulateCommitSummary) &&
+      !this.hasRepoRuleFailure()
+    )
+  }
+
+  /**
+   * Whether the user will be prevented from pushing this commit due to a repo rule failure.
+   */
+  private hasRepoRuleFailure(): boolean {
+    const { aheadBehind, repoRulesInfo } = this.props
+
+    if (!this.state.repoRulesEnabled) {
+      return false
+    }
+
+    return (
+      repoRulesInfo.basicCommitWarning === true ||
+      repoRulesInfo.signedCommitsRequired === true ||
+      repoRulesInfo.pullRequestRequired === true ||
+      this.state.repoRuleCommitMessageFailures.status === 'fail' ||
+      this.state.repoRuleCommitAuthorFailures.status === 'fail' ||
+      (aheadBehind === null &&
+        (repoRulesInfo.creationRestricted === true ||
+          this.state.repoRuleBranchNameFailures.status === 'fail'))
     )
   }
 
@@ -432,23 +637,50 @@ export class CommitMessage extends React.Component<
         : undefined
 
     const repositoryAccount = this.props.repositoryAccount
-    const accountEmails = repositoryAccount?.emails.map(e => e.email) ?? []
+    const accountEmails =
+      repositoryAccount?.emails.filter(e => e.verified).map(e => e.email) ?? []
+
+    if (repositoryAccount && isDotCom(repositoryAccount.endpoint)) {
+      const { id, login, endpoint } = repositoryAccount
+      const stealthEmail = getStealthEmailForUser(id, login, endpoint)
+
+      if (
+        !accountEmails
+          .map(x => x.toLowerCase())
+          .includes(stealthEmail.toLowerCase())
+      ) {
+        accountEmails.push(stealthEmail)
+      }
+    }
+
     const email = commitAuthor?.email
 
-    const warningBadgeVisible =
-      email !== undefined &&
-      repositoryAccount !== null &&
-      repositoryAccount !== undefined &&
-      isAttributableEmailFor(repositoryAccount, email) === false
+    let warningType: CommitMessageAvatarWarningType = 'none'
+    if (email !== undefined) {
+      if (
+        this.state.repoRulesEnabled &&
+        this.state.repoRuleCommitAuthorFailures.status !== 'pass'
+      ) {
+        warningType = 'disallowedEmail'
+      } else if (
+        repositoryAccount !== null &&
+        repositoryAccount !== undefined &&
+        isAttributableEmailFor(repositoryAccount, email) === false
+      ) {
+        warningType = 'misattribution'
+      }
+    }
 
     return (
       <CommitMessageAvatar
         user={avatarUser}
         email={commitAuthor?.email}
         isEnterpriseAccount={
-          repositoryAccount?.endpoint !== getDotComAPIEndpoint()
+          repositoryAccount !== null && isEnterpriseAccount(repositoryAccount)
         }
-        warningBadgeVisible={warningBadgeVisible}
+        warningType={warningType}
+        emailRuleFailures={this.state.repoRuleCommitAuthorFailures}
+        branch={this.props.branch}
         accountEmails={accountEmails}
         preferredAccountEmail={
           repositoryAccount !== null && repositoryAccount !== undefined
@@ -457,6 +689,9 @@ export class CommitMessage extends React.Component<
         }
         onUpdateEmail={this.onUpdateUserEmail}
         onOpenRepositorySettings={this.onOpenRepositorySettings}
+        onOpenGitSettings={this.onOpenGitSettings}
+        repository={repository}
+        accounts={this.props.accounts}
       />
     )
   }
@@ -471,6 +706,13 @@ export class CommitMessage extends React.Component<
       type: PopupType.RepositorySettings,
       repository: this.props.repository,
       initialSelectedTab: RepositorySettingsTab.GitConfig,
+    })
+  }
+
+  private onOpenGitSettings = () => {
+    this.props.onShowPopup({
+      type: PopupType.Preferences,
+      initialSelectedTab: PreferencesTab.Git,
     })
   }
 
@@ -502,7 +744,7 @@ export class CommitMessage extends React.Component<
         onAuthorsUpdated={this.onCoAuthorsUpdated}
         authors={this.props.coAuthors}
         autoCompleteProvider={autocompletionProvider}
-        disabled={this.props.isCommitting === true}
+        readOnly={this.props.isCommitting === true}
       />
     )
   }
@@ -585,14 +827,15 @@ export class CommitMessage extends React.Component<
     }
 
     return (
-      <button
+      <Button
         className="co-authors-toggle"
         onClick={this.onCoAuthorToggleButtonClick}
-        aria-label={this.toggleCoAuthorsText}
+        ariaLabel={this.toggleCoAuthorsText}
+        tooltip={this.toggleCoAuthorsText}
         disabled={this.props.isCommitting === true}
       >
         <Octicon symbol={addAuthorIcon} />
-      </button>
+      </Button>
     )
   }
 
@@ -661,14 +904,8 @@ export class CommitMessage extends React.Component<
     return <div className={className}>{this.renderCoAuthorToggleButton()}</div>
   }
 
-  private renderPermissionsCommitWarning() {
-    const {
-      commitToAmend,
-      showBranchProtected,
-      showNoWriteAccess,
-      repository,
-      branch,
-    } = this.props
+  private renderAmendCommitNotice() {
+    const { commitToAmend } = this.props
 
     if (commitToAmend !== null) {
       return (
@@ -680,7 +917,77 @@ export class CommitMessage extends React.Component<
           to make these changes as a new commit.
         </CommitWarning>
       )
-    } else if (showNoWriteAccess) {
+    } else {
+      return null
+    }
+  }
+
+  private renderBranchProtectionsRepoRulesCommitWarning() {
+    const {
+      showNoWriteAccess,
+      showBranchProtected,
+      repoRulesInfo,
+      aheadBehind,
+      repository,
+      branch,
+    } = this.props
+
+    const { repoRuleBranchNameFailures, repoRulesEnabled } = this.state
+
+    // if one of these is not bypassable, then that failure message needs to be shown rather than
+    // just displaying the first one in the if statement below
+    type WarningToDisplay = 'publish' | 'commitSigning' | 'basic' | null
+    const ruleEnforcementStatuses = new Map<
+      Exclude<WarningToDisplay, null>,
+      RepoRuleEnforced
+    >()
+
+    let repoRuleWarningToDisplay: WarningToDisplay = null
+
+    if (repoRulesEnabled) {
+      // has the current branch has been published?
+      if (aheadBehind === null && branch !== null) {
+        if (
+          repoRulesInfo.creationRestricted === true ||
+          repoRuleBranchNameFailures.status === 'fail'
+        ) {
+          ruleEnforcementStatuses.set('publish', true)
+        } else if (
+          repoRulesInfo.creationRestricted === 'bypass' ||
+          repoRuleBranchNameFailures.status === 'bypass'
+        ) {
+          ruleEnforcementStatuses.set('publish', 'bypass')
+        } else {
+          ruleEnforcementStatuses.set('publish', false)
+        }
+      }
+
+      ruleEnforcementStatuses.set(
+        'commitSigning',
+        repoRulesInfo.signedCommitsRequired
+      )
+      ruleEnforcementStatuses.set('basic', repoRulesInfo.basicCommitWarning)
+
+      // grab the first error to display
+      for (const status of ruleEnforcementStatuses) {
+        if (status[1] === true) {
+          repoRuleWarningToDisplay = status[0]
+          break
+        }
+      }
+
+      // if none errored, display the first bypassed
+      if (repoRuleWarningToDisplay === null) {
+        for (const status of ruleEnforcementStatuses) {
+          if (status[1] === 'bypass') {
+            repoRuleWarningToDisplay = status[0]
+            break
+          }
+        }
+      }
+    }
+
+    if (showNoWriteAccess) {
       return (
         <CommitWarning icon={CommitWarningIcon.Warning}>
           You don't have write access to <strong>{repository.name}</strong>.
@@ -696,7 +1003,7 @@ export class CommitMessage extends React.Component<
         // If the branch is null that means we haven't loaded the tip yet or
         // we're on a detached head. We shouldn't ever end up here with
         // showBranchProtected being true without a branch but who knows
-        // what fun and exiting edge cases the future might hold
+        // what fun and exciting edge cases the future might hold
         return null
       }
 
@@ -707,9 +1014,135 @@ export class CommitMessage extends React.Component<
           ?
         </CommitWarning>
       )
+    } else if (repoRuleWarningToDisplay === 'publish') {
+      const canBypass = ruleEnforcementStatuses.get('publish') === 'bypass'
+
+      return (
+        <CommitWarning
+          icon={canBypass ? CommitWarningIcon.Warning : CommitWarningIcon.Error}
+        >
+          The branch name <strong>{branch}</strong> fails{' '}
+          <RepoRulesetsForBranchLink
+            repository={repository.gitHubRepository}
+            branch={branch}
+          >
+            one or more rules
+          </RepoRulesetsForBranchLink>{' '}
+          that {canBypass ? 'would' : 'will'} prevent it from being published
+          {canBypass && ', but you can bypass them. Proceed with caution!'}
+          {!canBypass && (
+            <>
+              . Want to{' '}
+              <LinkButton onClick={this.onSwitchBranch}>
+                switch branches
+              </LinkButton>
+              ?
+            </>
+          )}
+        </CommitWarning>
+      )
+    } else if (repoRuleWarningToDisplay === 'commitSigning') {
+      const canBypass = repoRulesInfo.signedCommitsRequired === 'bypass'
+
+      return (
+        <CommitWarning
+          icon={canBypass ? CommitWarningIcon.Warning : CommitWarningIcon.Error}
+        >
+          <RepoRulesetsForBranchLink
+            repository={repository.gitHubRepository}
+            branch={branch}
+          >
+            One or more rules
+          </RepoRulesetsForBranchLink>{' '}
+          apply to the branch <strong>{branch}</strong> that require signed
+          commits
+          {canBypass && ', but you can bypass them. Proceed with caution!'}
+          {!canBypass && '.'}{' '}
+          <LinkButton uri="https://docs.github.com/authentication/managing-commit-signature-verification/signing-commits">
+            Learn more about commit signing.
+          </LinkButton>
+        </CommitWarning>
+      )
+    } else if (repoRuleWarningToDisplay === 'basic') {
+      const canBypass = repoRulesInfo.basicCommitWarning === 'bypass'
+
+      return (
+        <CommitWarning
+          icon={canBypass ? CommitWarningIcon.Warning : CommitWarningIcon.Error}
+        >
+          <RepoRulesetsForBranchLink
+            repository={repository.gitHubRepository}
+            branch={branch}
+          >
+            One or more rules
+          </RepoRulesetsForBranchLink>{' '}
+          apply to the branch <strong>{branch}</strong> that{' '}
+          {canBypass ? 'would' : 'will'} prevent pushing
+          {canBypass && ', but you can bypass them. Proceed with caution!'}
+          {!canBypass && (
+            <>
+              . Want to{' '}
+              <LinkButton onClick={this.onSwitchBranch}>
+                switch branches
+              </LinkButton>
+              ?
+            </>
+          )}
+        </CommitWarning>
+      )
     } else {
       return null
     }
+  }
+
+  private renderRuleFailurePopover() {
+    const { branch, repository } = this.props
+
+    // the failure status is checked here separately from whether the popover is open. if the
+    // user has it open but rules pass as they're typing, then keep the popover logic open
+    // but just don't render it. as they keep typing, if the message fails again, then the
+    // popover will open back up.
+    if (
+      !branch ||
+      !repository.gitHubRepository ||
+      !this.state.repoRulesEnabled ||
+      this.state.repoRuleCommitMessageFailures.status === 'pass'
+    ) {
+      return
+    }
+
+    const header = __DARWIN__
+      ? 'Commit Message Rule Failures'
+      : 'Commit message rule failures'
+    return (
+      <Popover
+        anchor={this.summaryTextInput}
+        anchorPosition={PopoverAnchorPosition.Right}
+        decoration={PopoverDecoration.Balloon}
+        minHeight={200}
+        ariaLabelledby="commit-message-rule-failure-popover-header"
+        onClickOutside={this.closeRuleFailurePopover}
+      >
+        <h3 id="commit-message-rule-failure-popover-header">{header}</h3>
+
+        <RepoRulesMetadataFailureList
+          repository={repository.gitHubRepository}
+          branch={branch}
+          failures={this.state.repoRuleCommitMessageFailures}
+          leadingText="This commit message"
+        />
+      </Popover>
+    )
+  }
+
+  private toggleRuleFailurePopover = () => {
+    this.setState({
+      isRuleFailurePopoverOpen: !this.state.isRuleFailurePopoverOpen,
+    })
+  }
+
+  public closeRuleFailurePopover = () => {
+    this.setState({ isRuleFailurePopoverOpen: false })
   }
 
   private onSwitchBranch = () => {
@@ -734,11 +1167,34 @@ export class CommitMessage extends React.Component<
       return verb
     }
 
+    /** N.B. For screen reader users, this string literal is important! This was
+     * moved into a string literal because when it was JSX it was interpreted
+     * as three separate strings "Verb" and "Count" and "to" and even tho
+     * visually it was correctly adding spacings, for screen reader users it was
+     * not and putting them all to together as one word. */
+    const action = `${verb} ${this.getFilesToBeCommittedButtonText()}to `
+
     return (
       <>
-        {verb} to <strong>{branch}</strong>
+        {action}
+        <strong>{branch}</strong>
       </>
     )
+  }
+
+  private getFilesToBeCommittedButtonText() {
+    const { filesToBeCommittedCount } = this.props
+
+    if (
+      filesToBeCommittedCount === undefined ||
+      filesToBeCommittedCount === 0
+    ) {
+      return ''
+    }
+
+    const pluralizedFile = filesToBeCommittedCount > 1 ? 'files' : 'file'
+
+    return `${filesToBeCommittedCount} ${pluralizedFile} `
   }
 
   private getCommittingButtonTitle() {
@@ -809,6 +1265,7 @@ export class CommitMessage extends React.Component<
         onClick={this.onSubmit}
         disabled={!buttonEnabled}
         tooltip={tooltip}
+        tooltipDismissable={false}
         onlyShowTooltipWhenOverflowed={buttonEnabled}
       >
         <>
@@ -833,13 +1290,52 @@ export class CommitMessage extends React.Component<
             </div>
           </>
         }
+        ariaLiveMessage={
+          'Great commit summaries contain fewer than 50 characters. Place extra information in the description field.'
+        }
         direction={TooltipDirection.NORTH}
         className="length-hint"
         tooltipClassName="length-hint-tooltip"
         ariaLabel="Open Summary Length Info"
       >
-        <Octicon symbol={OcticonSymbol.lightBulb} />
+        <Octicon symbol={octicons.lightBulb} />
       </ToggledtippedContent>
+    )
+  }
+
+  private renderRepoRuleCommitMessageFailureHint(): JSX.Element | null {
+    // enableRepoRules FF is checked before this method
+
+    if (this.state.repoRuleCommitMessageFailures.status === 'pass') {
+      return null
+    }
+
+    const canBypass =
+      this.state.repoRuleCommitMessageFailures.status === 'bypass'
+
+    let ariaLabelPrefix: string
+    let bypassMessage = ''
+    if (canBypass) {
+      ariaLabelPrefix = 'Warning'
+      bypassMessage = ', but you can bypass them'
+    } else {
+      ariaLabelPrefix = 'Error'
+    }
+
+    return (
+      <button
+        id="commit-message-failure-hint"
+        className="commit-message-failure-hint button-component"
+        aria-label={`${ariaLabelPrefix}: Commit message fails repository rules${bypassMessage}. View details.`}
+        aria-haspopup="dialog"
+        aria-expanded={this.state.isRuleFailurePopoverOpen}
+        onClick={this.toggleRuleFailurePopover}
+      >
+        <Octicon
+          symbol={canBypass ? octicons.alert : octicons.stop}
+          className={canBypass ? 'warning-icon' : 'error-icon'}
+        />
+      </button>
     )
   }
 
@@ -853,30 +1349,42 @@ export class CommitMessage extends React.Component<
       'with-overflow': this.state.descriptionObscured,
     })
 
-    const showSummaryLengthHint = this.state.summary.length > IdealSummaryLength
+    const showRepoRuleCommitMessageFailureHint =
+      this.state.repoRulesEnabled &&
+      this.state.repoRuleCommitMessageFailures.status !== 'pass'
+
+    const showSummaryLengthHint =
+      this.props.showCommitLengthWarning &&
+      !showRepoRuleCommitMessageFailureHint &&
+      this.state.summary.length > IdealSummaryLength
+
     const summaryClassName = classNames('summary', {
-      'with-length-hint': showSummaryLengthHint,
+      'with-trailing-icon':
+        showRepoRuleCommitMessageFailureHint || showSummaryLengthHint,
     })
     const summaryInputClassName = classNames('summary-field', 'nudge-arrow', {
       'nudge-arrow-left': this.props.shouldNudge === true,
     })
 
+    const ariaDescribedBy = showRepoRuleCommitMessageFailureHint
+      ? this.COMMIT_MSG_ERROR_BTN_ID
+      : undefined
+
     const { placeholder, isCommitting, commitSpellcheckEnabled } = this.props
 
     return (
-      // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
       <div
         role="group"
         aria-label="Create commit"
         className={className}
         onContextMenu={this.onContextMenu}
-        onKeyDown={this.onKeyDown}
       >
         <div className={summaryClassName}>
           {this.renderAvatar()}
 
           <AutocompletingInput
             required={true}
+            label={this.props.showInputLabels === true ? 'Summary' : undefined}
             screenReaderLabel="Commit summary"
             className={summaryInputClassName}
             placeholder={placeholder}
@@ -886,30 +1394,44 @@ export class CommitMessage extends React.Component<
             autocompletionProviders={
               this.state.commitMessageAutocompletionProviders
             }
+            aria-describedby={ariaDescribedBy}
             onContextMenu={this.onAutocompletingInputContextMenu}
-            disabled={isCommitting === true}
+            readOnly={isCommitting === true}
             spellcheck={commitSpellcheckEnabled}
           />
+          {showRepoRuleCommitMessageFailureHint &&
+            this.renderRepoRuleCommitMessageFailureHint()}
           {showSummaryLengthHint && this.renderSummaryLengthHint()}
         </div>
 
+        {this.state.isRuleFailurePopoverOpen && this.renderRuleFailurePopover()}
+
+        {this.props.showInputLabels === true && (
+          <label htmlFor="commit-message-description">Description</label>
+        )}
         <FocusContainer
           className="description-focus-container"
           onClick={this.onFocusContainerClick}
         >
           <AutocompletingTextArea
+            inputId="commit-message-description"
             className={descriptionClassName}
-            screenReaderLabel="Commit description"
+            screenReaderLabel={
+              this.props.showInputLabels !== true
+                ? 'Commit description'
+                : undefined
+            }
             placeholder="Description"
             value={this.state.description || ''}
             onValueChanged={this.onDescriptionChanged}
             autocompletionProviders={
               this.state.commitMessageAutocompletionProviders
             }
+            aria-describedby={ariaDescribedBy}
             ref={this.onDescriptionFieldRef}
             onElementRef={this.onDescriptionTextAreaRef}
             onContextMenu={this.onAutocompletingInputContextMenu}
-            disabled={isCommitting === true}
+            readOnly={isCommitting === true}
             spellcheck={commitSpellcheckEnabled}
           />
           {this.renderActionBar()}
@@ -917,7 +1439,8 @@ export class CommitMessage extends React.Component<
 
         {this.renderCoAuthorInput()}
 
-        {this.renderPermissionsCommitWarning()}
+        {this.renderAmendCommitNotice()}
+        {this.renderBranchProtectionsRepoRulesCommitWarning()}
 
         {this.renderSubmitButton()}
         <span className="sr-only" aria-live="polite" aria-atomic="true">
